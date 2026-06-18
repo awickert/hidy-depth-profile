@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hidy-depth-profile"
+version = "0.1.0"
+description = "Monte Carlo ¹⁰Be depth-profile simulator (Python translation of Hidy et al. MATLAB code)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+gui = ["PyQt6"]
+dev = ["pytest", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hidy_depth_profile*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
