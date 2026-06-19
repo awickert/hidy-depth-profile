@@ -45,6 +45,17 @@ class _DistParam:
         mu, sigma = self.parameters
         return float(rng.normal(mu, sigma))
 
+    def draw_batch(self, rng: np.random.Generator, n: int) -> np.ndarray:
+        """Draw n samples as a 1-D NumPy array."""
+        if self.mode == "constant":
+            return np.full(n, self.parameters[0])
+        if self.mode == "uniform":
+            lo, hi = self.parameters
+            return rng.uniform(lo, hi, size=n)
+        # normal
+        mu, sigma = self.parameters
+        return rng.normal(mu, sigma, size=n)
+
 
 class ProfileSettings:
     """
