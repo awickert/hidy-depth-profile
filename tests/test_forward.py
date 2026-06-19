@@ -65,6 +65,21 @@ class TestSampleConcentration:
         N_high_er = sample_concentration(erosion_deposition_rate=0.01, **kwargs)
         assert N_low_er > N_high_er
 
+    def test_deposition_higher_concentration_than_erosion(self):
+        """
+        Deposition (negative rate) buries the sample faster than erosion uncovers it.
+        A sample being buried was shallower in the past → more production history
+        than one being eroded (uncovered from deeper) at the same absolute rate.
+        """
+        v1, v2 = self._v1_v2()
+        kwargs = dict(depth=50.0, thickness=10.0, density=2.2,
+                      v1=v1, v2=v2,
+                      time=15000.0, decay_const=DECAY_BE10,
+                      inheritance=0.0)
+        N_deposit = sample_concentration(erosion_deposition_rate=-0.001, **kwargs)
+        N_erode   = sample_concentration(erosion_deposition_rate=+0.001, **kwargs)
+        assert N_deposit > N_erode
+
 
 class TestChi2:
     def test_perfect_fit(self):

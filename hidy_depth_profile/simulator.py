@@ -9,6 +9,10 @@ Translation of be_maincalc.m, extended with vectorised batch evaluation:
       parallelised over all CPU cores via prange. Activates when Numba
       is installed and compatible with the current NumPy.
     * NumPy fallback: (B, 6) broadcasting with a Python loop over depths.
+- The signed surface-change rate (positive = erosion, negative = deposition)
+  feeds directly into the production integral: simp = λ + rate·ρ/Λ. Negative
+  rates represent burial, requiring a physical constraint that total deposition
+  does not exceed the depth of the shallowest sample.
 - The importance-sampling grid is updated with np.add.at on flat indices.
 - Batch size is adapted each cycle to target ~100 accepted solutions per
   batch, staying efficient across both high and low acceptance-rate cases.
@@ -195,6 +199,7 @@ class MonteCarloSimulator:
         self._rel_error = pd["rel_error"]
         self._n_depths = len(self._depths)
         self._dof = max(1, self._n_depths)
+        self._z_min = float(np.min(self._depths))  # cm — shallowness constraint for deposition
 
         if s.density_from_file:
             from .io import cumulative_bulk_density
@@ -340,11 +345,15 @@ class MonteCarloSimulator:
                     "Check settings (erosion threshold, chi2 threshold, prior ranges)."
                 )
 
-            # ---- draw age + erosion/deposition; apply threshold constraint ----
+            # ---- draw age + erosion/deposition; apply threshold + shallowness constraints ----
             ages_raw = s.mc_age.draw_batch(rng, batch_size)
             erosions_raw = s.mc_erosion_deposition_rate.draw_batch(rng, batch_size) * 1e-3  # → cm/yr
             total_change = ages_raw * erosions_raw   # signed cm: positive=erosion, negative=deposition
             valid = (total_change >= edt_lo) & (total_change <= edt_hi)
+            # Physical constraint: total deposition cannot exceed the depth of the
+            # shallowest sample — otherwise that sample was above the surface during
+            # part of the integration window.
+            valid &= total_change >= -self._z_min
             ages = ages_raw[valid]
             erosions = erosions_raw[valid]
             B = len(ages)
