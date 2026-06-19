@@ -1,0 +1,75 @@
+# Lees Ferry sand 6 — example configuration
+# Reference: Hidy et al. (2010), Quaternary Geochronology 5, 541–560
+#
+# Settings transcribed from Leesferrysand_settings.mat (MATLAB v1.2 run).
+# The production rate (9.505 at/g/yr) is pre-computed from Stone 2000
+# (ref = 4.76 at/g/yr SLHL, MATLAB standard-atmosphere pressure) multiplied
+# by the topographic shielding factor (~0.979 from LF_shield.txt).
+# Because the rate is stored as a constant, set shielding.value = 1.0.
+
+site:
+  name: "Lees Ferry sand 6"
+  latitude:  36.852      # decimal degrees
+  longitude: -111.606
+  elevation: 985.0       # metres
+
+data:
+  profile:   "Leesferry_sand6.txt"   # 6 samples, 27.5–217.5 cm
+  shielding: "LF_shield.txt"         # azimuth/dip pairs; used to compute shielding_value
+  density:   null
+
+production:
+  isotope: "Be-10"
+  scheme:  "constant"
+  reference_rate: 4.76     # at/g/yr SLHL (informational; not used when scheme=constant)
+  constant_rate: 9.50537   # at/g/yr at site (Stone 2000 × shielding, MATLAB atmosphere)
+
+  # Drawn as a fixed constant in every MC iteration
+  error:
+    mode: "constant"
+    parameters: [9.50537]
+
+  half_life_sigma: 0.05   # fractional 1σ uncertainty on Be-10 half-life
+
+muons:
+  fit_depth_m:    5.0   # metres (matching original MATLAB fitdepth = 5)
+  percent_error:  0.0   # no muon rate uncertainty in original run
+
+density:
+  from_file: false
+  error:
+    mode: "uniform"
+    parameters: [2.2, 2.5]   # g/cm³
+
+shielding:
+  from_file: false   # shielding already folded into production.error.parameters
+  value: 1.0
+
+monte_carlo:
+  n_solutions: 1000
+
+  age:                  # yr
+    mode: "uniform"
+    parameters: [60000, 110000]
+
+  erosion_rate:         # cm/ka
+    mode: "uniform"
+    parameters: [0.0, 0.4]
+
+  inheritance:          # atoms/g
+    mode: "uniform"
+    parameters: [60000, 120000]
+
+  neutron_attenuation:  # g/cm²
+    mode: "normal"
+    parameters: [160.0, 5.0]
+
+  total_erosion_threshold:   # [min, max] cm of cumulative erosion
+    - 0.0
+    - 30.0
+
+  confidence:
+    mode: "sigma"
+    value: 2.0
+
+  n_workers: 4
