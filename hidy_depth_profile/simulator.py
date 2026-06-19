@@ -128,31 +128,42 @@ class MonteCarloSimulator:
         self._fast_relerr = muon["fast_relerr"]
         self._neg_relerr = muon["neg_relerr"]
 
+        # shielding factor (applied to spallation only; muon terms are unshielded)
+        self._shielding = s.shielding_value
+
         # spallation surface production rate (mean of prior)
-        s_obj = s
         scheme = s.production_scheme
         if scheme == "constant":
+            # User provides the final shielded rate; shielding_value should be 1.0
             spall_mean = s.constant_rate
         elif scheme == "stone2000":
-            spall_mean = stone2000_surface_rate(
+            raw = stone2000_surface_rate(
                 s.latitude, s.longitude, s.elevation,
                 s.reference_rate, s.isotope,
             )
+            spall_mean = raw * self._shielding
         else:  # lsdn
-            spall_mean = lsdn_surface_rate(
+            raw = lsdn_surface_rate(
                 s.latitude, s.longitude, s.elevation,
                 s.lsdn_assumed_age_yr, s.reference_rate,
                 s.collection_year, s.isotope,
             )
+            spall_mean = raw * self._shielding
         self._spall_mean = spall_mean
-        print(f"  Spallation surface rate: {spall_mean:.4f} at/g/yr", flush=True)
 
-        # override the production_error distribution mean if stone2000/lsdn
+        # update the production_error distribution centre for computed schemes
         if scheme != "constant" and s.production_error.mode == "normal":
             s._production_error.parameters[0] = spall_mean
+        elif scheme != "constant" and s.production_error.mode == "uniform":
+            half = (s._production_error.parameters[1] - s._production_error.parameters[0]) / 2.0
+            s._production_error.parameters = [spall_mean - half, spall_mean + half]
 
-        # shielding factor
-        self._shielding = s.shielding_value
+        # print the effective rate actually used in the MC draws
+        if s.production_error.mode == "constant":
+            print(f"  Spallation rate (constant, pre-computed): {s.production_error.parameters[0]:.4f} at/g/yr",
+                  flush=True)
+        else:
+            print(f"  Spallation rate (computed, shielded): {spall_mean:.4f} at/g/yr", flush=True)
 
         # profile data
         pd = s.profile_data
