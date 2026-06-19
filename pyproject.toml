@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = ["PyQt6"]
+fast = ["numba"]
 dev = ["pytest", "pytest-cov"]
 
 [tool.setuptools.packages.find]

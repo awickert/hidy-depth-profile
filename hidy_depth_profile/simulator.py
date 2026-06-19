@@ -3,9 +3,12 @@ MonteCarloSimulator and Results.
 
 Translation of be_maincalc.m, extended with vectorised batch evaluation:
 - Parameter draws use NumPy RNG batch methods (one call per distribution).
-- The forward model evaluates an entire batch of B draws simultaneously
-  via broadcasting over (B, 6) pathway arrays, with a Python loop only
-  over the small number of depth samples (≤ ~10).
+- The forward model evaluates an entire batch of B draws simultaneously.
+  Two backends are available, selected automatically at setup:
+    * Numba (``pip install hidy-depth-profile[fast]``): JIT-compiled,
+      parallelised over all CPU cores via prange. Activates when Numba
+      is installed and compatible with the current NumPy.
+    * NumPy fallback: (B, 6) broadcasting with a Python loop over depths.
 - The importance-sampling grid is updated with np.add.at on flat indices.
 - Batch size is adapted each cycle to target ~100 accepted solutions per
   batch, staying efficient across both high and low acceptance-rate cases.
@@ -18,6 +21,7 @@ from typing import Optional
 
 import numpy as np
 
+from ._numba import NUMBA_AVAILABLE, NUMBA_INFO, numba_forward_batch
 from .forward import chi2_profile
 from .inversion import BayesianPDF, bayesian_pdf, chi2_threshold
 from .production import fit_muon_curves, lsdn_surface_rate, stone2000_surface_rate
@@ -224,6 +228,8 @@ class MonteCarloSimulator:
         # flattened grid shape for efficient indexing
         self._grid_shape = (len(self._age_bins), len(self._erosion_bins), len(self._inh_bins))
 
+        self._use_numba = NUMBA_AVAILABLE
+        print(f"  Forward-model backend: {NUMBA_INFO}", flush=True)
         print("Setup complete.", flush=True)
 
     # ------------------------------------------------------------------
@@ -236,30 +242,35 @@ class MonteCarloSimulator:
                         v1: np.ndarray,
                         v2: np.ndarray) -> np.ndarray:
         """
-        Vectorised forward model for a batch of B parameter draws.
+        Forward model for a batch of B parameter draws → (B, n_depths) atoms/g.
 
-        Parameters
-        ----------
-        ages        : (B,) yr
-        decay_consts: (B,) yr⁻¹
-        erosions    : (B,) cm/yr
-        inheritances: (B,) atoms/g
-        densities   : (B, n_depths) g/cm³
-        v1          : (B, 6) effective attenuation lengths (g/cm²)
-        v2          : (B, 6) surface production rates (atoms/g/yr)
-
-        Returns
-        -------
-        modelled : (B, n_depths) atoms/g
+        Dispatches to the Numba JIT kernel when Numba is available; falls back
+        to the pure-NumPy implementation otherwise. Both paths are numerically
+        identical.
         """
+        if self._use_numba:
+            return numba_forward_batch(
+                ages, decay_consts, erosions, inheritances, densities,
+                v1, v2, self._depths, self._thicknesses,
+            )
+        return self._forward_batch_numpy(
+            ages, decay_consts, erosions, inheritances, densities, v1, v2,
+        )
+
+    def _forward_batch_numpy(self,
+                              ages: np.ndarray,
+                              decay_consts: np.ndarray,
+                              erosions: np.ndarray,
+                              inheritances: np.ndarray,
+                              densities: np.ndarray,
+                              v1: np.ndarray,
+                              v2: np.ndarray) -> np.ndarray:
+        """Pure-NumPy vectorised forward model (fallback when Numba is absent)."""
         B = len(ages)
         n = self._n_depths
         modelled = np.empty((B, n))
 
-        # inheritance term is the same for all depth samples
         inh_term = inheritances * np.exp(-ages * decay_consts)   # (B,)
-
-        # expand scalars for broadcasting with (B, 6)
         t_v = ages[:, None]
         lam_v = decay_consts[:, None]
         er_v = erosions[:, None]
