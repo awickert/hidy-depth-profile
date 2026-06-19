@@ -105,10 +105,10 @@ class ProfileSettings:
         # Monte Carlo
         self._mc_n_solutions: int = 1000
         self._mc_age: _DistParam = _DistParam("normal", [15000.0, 5000.0])
-        self._mc_erosion_rate: _DistParam = _DistParam("uniform", [0.0, 5.0])
+        self._mc_erosion_deposition_rate: _DistParam = _DistParam("uniform", [0.0, 5.0])
         self._mc_inheritance: _DistParam = _DistParam("uniform", [0.0, 50000.0])
         self._mc_neutron_attenuation: _DistParam = _DistParam("normal", [160.0, 5.0])
-        self._mc_total_erosion_threshold: list = [0.0, 50.0]
+        self._mc_erosion_deposition_threshold: list = [0.0, 50.0]
         self._mc_confidence_mode: str = "sigma"
         self._mc_confidence_value: float = 2.0
         self._mc_n_workers: int = 4
@@ -326,13 +326,13 @@ class ProfileSettings:
         self._mc_age = v
 
     @property
-    def mc_erosion_rate(self): return self._mc_erosion_rate
-    @mc_erosion_rate.setter
-    def mc_erosion_rate(self, v):
+    def mc_erosion_deposition_rate(self): return self._mc_erosion_deposition_rate
+    @mc_erosion_deposition_rate.setter
+    def mc_erosion_deposition_rate(self, v):
         if not isinstance(v, _DistParam):
-            raise TypeError("mc_erosion_rate must be a _DistParam")
-        v.validate("mc_erosion_rate")
-        self._mc_erosion_rate = v
+            raise TypeError("mc_erosion_deposition_rate must be a _DistParam")
+        v.validate("mc_erosion_deposition_rate")
+        self._mc_erosion_deposition_rate = v
 
     @property
     def mc_inheritance(self): return self._mc_inheritance
@@ -353,13 +353,13 @@ class ProfileSettings:
         self._mc_neutron_attenuation = v
 
     @property
-    def mc_total_erosion_threshold(self): return self._mc_total_erosion_threshold
-    @mc_total_erosion_threshold.setter
-    def mc_total_erosion_threshold(self, v):
+    def mc_erosion_deposition_threshold(self): return self._mc_erosion_deposition_threshold
+    @mc_erosion_deposition_threshold.setter
+    def mc_erosion_deposition_threshold(self, v):
         v = list(v)
         if len(v) != 2 or v[0] > v[1]:
-            raise ValueError("mc_total_erosion_threshold must be [min, max] with min ≤ max")
-        self._mc_total_erosion_threshold = v
+            raise ValueError("mc_erosion_deposition_threshold must be [min, max] with min ≤ max")
+        self._mc_erosion_deposition_threshold = v
 
     @property
     def mc_confidence_mode(self): return self._mc_confidence_mode
@@ -410,7 +410,7 @@ class ProfileSettings:
         self._production_error.validate("production_error")
         self._density_error.validate("density_error")
         self._mc_age.validate("mc_age")
-        self._mc_erosion_rate.validate("mc_erosion_rate")
+        self._mc_erosion_deposition_rate.validate("mc_erosion_deposition_rate")
         self._mc_inheritance.validate("mc_inheritance")
         self._mc_neutron_attenuation.validate("mc_neutron_attenuation")
         if self._density_from_file and self.density_data is None:

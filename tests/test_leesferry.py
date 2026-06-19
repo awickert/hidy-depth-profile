@@ -72,8 +72,8 @@ class TestLeesFerryPhysics:
         assert ages_ka.max() <= 110.0, f"Age above prior maximum: {ages_ka.max():.1f} ka"
 
     def test_erosion_within_prior(self, leesferry_results):
-        """All erosion rates must lie within [0, 0.4] cm/ka."""
-        erosion_cm_ka = leesferry_results.erosion_rate * 1e3
+        """All erosion/deposition rates must lie within [0, 0.4] cm/ka (erosion-only prior)."""
+        erosion_cm_ka = leesferry_results.erosion_deposition_rate * 1e3
         assert erosion_cm_ka.min() >= 0.0
         assert erosion_cm_ka.max() <= 0.4 + 1e-6
 
@@ -93,7 +93,7 @@ class TestLeesFerryPhysics:
     def test_bayesian_pdfs_exist(self, leesferry_results):
         """All three marginal PDFs should be non-None (all parameters are free)."""
         assert leesferry_results.pdf_age is not None
-        assert leesferry_results.pdf_erosion is not None
+        assert leesferry_results.pdf_erosion_deposition is not None
         assert leesferry_results.pdf_inheritance is not None
 
     def test_age_cdf_monotone(self, leesferry_results):

@@ -16,7 +16,7 @@ import numpy as np
 
 
 def sample_concentration(depth, thickness, density, v1, v2,
-                          time, decay_const, erosion_rate, inheritance):
+                          time, decay_const, erosion_deposition_rate, inheritance):
     """
     Modelled ¹⁰Be concentration for a single depth sample.
 
@@ -29,7 +29,8 @@ def sample_concentration(depth, thickness, density, v1, v2,
     v2 : array (6,), surface production rates (atoms/g/yr) for each pathway
     time : float, exposure age (yr)
     decay_const : float, radioactive decay constant (yr⁻¹)
-    erosion_rate : float, erosion rate (cm/yr)
+    erosion_deposition_rate : float, signed surface-change rate (cm/yr);
+        positive = erosion (surface lowering), negative = deposition (burial)
     inheritance : float, pre-exposure ¹⁰Be concentration (atoms/g)
 
     Returns
@@ -41,14 +42,14 @@ def sample_concentration(depth, thickness, density, v1, v2,
 
     tmp1 = np.exp(-depth * density / v1)
     tmp2 = np.exp(-(depth + thickness) * density / v1)
-    simp = decay_const + erosion_rate * density / v1
+    simp = decay_const + erosion_deposition_rate * density / v1
     tmp3 = (v1 * v2) * (np.exp(-time * simp) - 1.0) / (density * simp)
 
     return np.sum((tmp2 - tmp1) * tmp3) / thickness + inheritance * np.exp(-time * decay_const)
 
 
 def profile_concentration(profile_data, v1, v2, time, decay_const,
-                           erosion_rate, inheritance, densities):
+                           erosion_deposition_rate, inheritance, densities):
     """
     Modelled ¹⁰Be concentrations for an entire depth profile.
 
@@ -59,7 +60,7 @@ def profile_concentration(profile_data, v1, v2, time, decay_const,
     v2 : array (6,), surface production rates
     time : float, exposure age (yr)
     decay_const : float, decay constant (yr⁻¹)
-    erosion_rate : float, erosion rate (cm/yr)
+    erosion_deposition_rate : float, signed surface-change rate (cm/yr)
     inheritance : float, inheritance (atoms/g)
     densities : array (n_depths,), bulk density per sample (g/cm³)
 
@@ -74,7 +75,7 @@ def profile_concentration(profile_data, v1, v2, time, decay_const,
     for k in range(n):
         modelled[k] = sample_concentration(
             depths[k], thicknesses[k], densities[k],
-            v1, v2, time, decay_const, erosion_rate, inheritance,
+            v1, v2, time, decay_const, erosion_deposition_rate, inheritance,
         )
     return modelled
 

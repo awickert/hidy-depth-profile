@@ -52,7 +52,7 @@ monte_carlo:
     mode: "uniform"
     parameters: [60000, 110000]
 
-  erosion_rate:         # cm/ka
+  erosion_deposition_rate:   # cm/ka (positive = erosion, negative = deposition)
     mode: "uniform"
     parameters: [0.0, 0.4]
 
@@ -64,8 +64,8 @@ monte_carlo:
     mode: "normal"
     parameters: [160.0, 5.0]
 
-  total_erosion_threshold:   # [min, max] cm of cumulative erosion
-    - 0.0
+  erosion_deposition_threshold:   # [min, max] signed cm of total surface change
+    - 0.0                          # positive = erosion, negative = deposition
     - 30.0
 
   confidence:

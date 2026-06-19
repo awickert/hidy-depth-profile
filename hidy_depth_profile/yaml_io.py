@@ -68,16 +68,18 @@ def load_yaml(filename: str):
     s.mc_n_solutions = mc.get("n_solutions", 1000)
     if "age" in mc:
         s.mc_age = _DistParam(mc["age"]["mode"], mc["age"]["parameters"])
-    if "erosion_rate" in mc:
-        s.mc_erosion_rate = _DistParam(mc["erosion_rate"]["mode"], mc["erosion_rate"]["parameters"])
+    if "erosion_deposition_rate" in mc:
+        s.mc_erosion_deposition_rate = _DistParam(
+            mc["erosion_deposition_rate"]["mode"], mc["erosion_deposition_rate"]["parameters"]
+        )
     if "inheritance" in mc:
         s.mc_inheritance = _DistParam(mc["inheritance"]["mode"], mc["inheritance"]["parameters"])
     if "neutron_attenuation" in mc:
         s.mc_neutron_attenuation = _DistParam(
             mc["neutron_attenuation"]["mode"], mc["neutron_attenuation"]["parameters"]
         )
-    if "total_erosion_threshold" in mc:
-        s.mc_total_erosion_threshold = mc["total_erosion_threshold"]
+    if "erosion_deposition_threshold" in mc:
+        s.mc_erosion_deposition_threshold = mc["erosion_deposition_threshold"]
     if "confidence" in mc:
         s.mc_confidence_mode = mc["confidence"]["mode"]
         s.mc_confidence_value = mc["confidence"]["value"]
@@ -133,10 +135,10 @@ def save_yaml(settings, filename: str):
         "monte_carlo": {
             "n_solutions": settings.mc_n_solutions,
             "age": _dp(settings.mc_age),
-            "erosion_rate": _dp(settings.mc_erosion_rate),
+            "erosion_deposition_rate": _dp(settings.mc_erosion_deposition_rate),
             "inheritance": _dp(settings.mc_inheritance),
             "neutron_attenuation": _dp(settings.mc_neutron_attenuation),
-            "total_erosion_threshold": settings.mc_total_erosion_threshold,
+            "erosion_deposition_threshold": settings.mc_erosion_deposition_threshold,
             "confidence": {
                 "mode": settings.mc_confidence_mode,
                 "value": settings.mc_confidence_value,

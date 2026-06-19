@@ -35,7 +35,7 @@ def bayesian_pdf(
     grid_sums: np.ndarray,
     grid_counts: np.ndarray,
     age_bins: np.ndarray,
-    erosion_bins: np.ndarray,
+    erosion_deposition_bins: np.ndarray,
     inheritance_bins: np.ndarray,
 ) -> Tuple[Optional[BayesianPDF], Optional[BayesianPDF], Optional[BayesianPDF]]:
     """
@@ -45,22 +45,25 @@ def bayesian_pdf(
 
     Parameters
     ----------
-    grid_sums : 3-D array (n_age, n_erosion, n_inheritance), sum of exp(-chi2/2) weights
+    grid_sums : 3-D array (n_age, n_erosion_deposition, n_inheritance),
+        sum of exp(-chi2/2) weights
     grid_counts : 3-D array, draw counts per cell
     age_bins : 1-D array, age axis values (yr) — may be scalar if constant
-    erosion_bins : 1-D array, erosion axis values (cm/yr) — may be scalar
+    erosion_deposition_bins : 1-D array, signed surface-change rate axis (cm/yr);
+        positive = erosion, negative = deposition — may be scalar
     inheritance_bins : 1-D array, inheritance axis values (atoms/g) — may be scalar
 
     Returns
     -------
-    pdf_age, pdf_erosion, pdf_inheritance : BayesianPDF or None if parameter is constant
+    pdf_age, pdf_erosion_deposition, pdf_inheritance :
+        BayesianPDF or None if parameter is constant
     """
     # normalise by count: convert sum to mean weight per cell
     grid = grid_sums.copy()
     valid = grid_counts > 0
     grid[valid] /= grid_counts[valid]
 
-    pdf_age = pdf_erosion = pdf_inheritance = None
+    pdf_age = pdf_erosion_deposition = pdf_inheritance = None
 
     # age marginal
     if len(age_bins) > 1:
@@ -78,20 +81,20 @@ def bayesian_pdf(
             sigma2_minus=_interp_quantile(age_bins, cdf, 0.023),
         )
 
-    # erosion marginal (erosion_bins in cm/yr internally; user sees cm/ka)
-    if len(erosion_bins) > 1:
-        step = erosion_bins[1] - erosion_bins[0]
+    # erosion/deposition marginal (bins in cm/yr internally; user sees cm/ka)
+    if len(erosion_deposition_bins) > 1:
+        step = erosion_deposition_bins[1] - erosion_deposition_bins[0]
         probs = grid.sum(axis=(0, 2))
         probs = probs / (probs.sum() * step)
         cdf = np.cumsum(probs) / probs.sum()
-        map_val = float(erosion_bins[np.argmax(probs)])
-        pdf_erosion = BayesianPDF(
-            bins=erosion_bins,
+        map_val = float(erosion_deposition_bins[np.argmax(probs)])
+        pdf_erosion_deposition = BayesianPDF(
+            bins=erosion_deposition_bins,
             pdf=probs,
             cdf=cdf,
             map_value=map_val,
-            sigma2_plus=_interp_quantile(erosion_bins, cdf, 0.977),
-            sigma2_minus=_interp_quantile(erosion_bins, cdf, 0.023),
+            sigma2_plus=_interp_quantile(erosion_deposition_bins, cdf, 0.977),
+            sigma2_minus=_interp_quantile(erosion_deposition_bins, cdf, 0.023),
         )
 
     # inheritance marginal
@@ -110,7 +113,7 @@ def bayesian_pdf(
             sigma2_minus=_interp_quantile(inheritance_bins, cdf, 0.023),
         )
 
-    return pdf_age, pdf_erosion, pdf_inheritance
+    return pdf_age, pdf_erosion_deposition, pdf_inheritance
 
 
 def chi2_threshold(confidence_mode: str, confidence_value: float) -> float:

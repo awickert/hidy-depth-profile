@@ -43,30 +43,30 @@ class Results:
     All arrays have length n_accepted.
     """
     chi2: np.ndarray
-    age: np.ndarray               # yr
-    erosion_rate: np.ndarray      # cm/yr
-    inheritance: np.ndarray       # atoms/g
-    spall_prod_rate: np.ndarray   # atoms/g/yr (drawn)
-    muon_prod_rate: np.ndarray    # total muon surface rate (drawn)
-    neutron_attenuation: np.ndarray  # g/cm²
-    decay_const: np.ndarray       # yr⁻¹
-    densities: np.ndarray         # (n_accepted, n_depths)
+    age: np.ndarray                        # yr
+    erosion_deposition_rate: np.ndarray   # cm/yr (positive=erosion, negative=deposition)
+    inheritance: np.ndarray               # atoms/g
+    spall_prod_rate: np.ndarray           # atoms/g/yr (drawn)
+    muon_prod_rate: np.ndarray            # total muon surface rate (drawn)
+    neutron_attenuation: np.ndarray       # g/cm²
+    decay_const: np.ndarray              # yr⁻¹
+    densities: np.ndarray                 # (n_accepted, n_depths)
 
     n_accepted: int
     n_iterations: int
 
     pdf_age: Optional[BayesianPDF]
-    pdf_erosion: Optional[BayesianPDF]
+    pdf_erosion_deposition: Optional[BayesianPDF]
     pdf_inheritance: Optional[BayesianPDF]
 
     best_age_ka: float = 0.0
-    best_erosion_cm_ka: float = 0.0
+    best_erosion_deposition_cm_ka: float = 0.0
     best_inheritance_1e4: float = 0.0
 
     age_sigma2_plus_ka: float = float("nan")
     age_sigma2_minus_ka: float = float("nan")
-    erosion_sigma2_plus_cm_ka: float = float("nan")
-    erosion_sigma2_minus_cm_ka: float = float("nan")
+    erosion_deposition_sigma2_plus_cm_ka: float = float("nan")
+    erosion_deposition_sigma2_minus_cm_ka: float = float("nan")
 
     def to_csv(self, filename: str):
         """Write chi², age (ka), erosion (cm/ka), inheritance to CSV."""
@@ -212,11 +212,13 @@ class MonteCarloSimulator:
                                           s.mc_age.parameters[1], resolution)
         else:
             self._age_bins = np.array([s.mc_age.parameters[0]])
-        if s.mc_erosion_rate.mode != "constant":
-            lo, hi = s.mc_erosion_rate.parameters
-            self._erosion_bins = np.linspace(lo * 1e-3, hi * 1e-3, resolution)
+        if s.mc_erosion_deposition_rate.mode != "constant":
+            lo, hi = s.mc_erosion_deposition_rate.parameters
+            self._erosion_deposition_bins = np.linspace(lo * 1e-3, hi * 1e-3, resolution)
         else:
-            self._erosion_bins = np.array([s.mc_erosion_rate.parameters[0] * 1e-3])
+            self._erosion_deposition_bins = np.array(
+                [s.mc_erosion_deposition_rate.parameters[0] * 1e-3]
+            )
         if s.mc_inheritance.mode != "constant":
             self._inh_bins = np.linspace(s.mc_inheritance.parameters[0],
                                           s.mc_inheritance.parameters[1], resolution)
@@ -226,7 +228,7 @@ class MonteCarloSimulator:
         self._chi2_thresh = chi2_threshold(s.mc_confidence_mode, s.mc_confidence_value)
 
         # flattened grid shape for efficient indexing
-        self._grid_shape = (len(self._age_bins), len(self._erosion_bins), len(self._inh_bins))
+        self._grid_shape = (len(self._age_bins), len(self._erosion_deposition_bins), len(self._inh_bins))
 
         self._use_numba = NUMBA_AVAILABLE
         print(f"  Forward-model backend: {NUMBA_INFO}", flush=True)
@@ -301,12 +303,12 @@ class MonteCarloSimulator:
         rng = np.random.default_rng(seed)
         s = self.s
         n_target = s.mc_n_solutions
-        et_lo, et_hi = s.mc_total_erosion_threshold   # cm
+        edt_lo, edt_hi = s.mc_erosion_deposition_threshold   # cm, signed
 
         # pre-allocate accepted solution storage
         chi2_acc = np.empty(n_target)
         age_acc = np.empty(n_target)
-        erosion_acc = np.empty(n_target)
+        erosion_deposition_acc = np.empty(n_target)
         inh_acc = np.empty(n_target)
         spall_acc = np.empty(n_target)
         muon_acc = np.empty(n_target)
@@ -338,11 +340,11 @@ class MonteCarloSimulator:
                     "Check settings (erosion threshold, chi2 threshold, prior ranges)."
                 )
 
-            # ---- draw age + erosion; apply total-erosion constraint ----
+            # ---- draw age + erosion/deposition; apply threshold constraint ----
             ages_raw = s.mc_age.draw_batch(rng, batch_size)
-            erosions_raw = s.mc_erosion_rate.draw_batch(rng, batch_size) * 1e-3  # → cm/yr
-            total_erosion = ages_raw * erosions_raw
-            valid = (total_erosion >= et_lo) & (total_erosion <= et_hi)
+            erosions_raw = s.mc_erosion_deposition_rate.draw_batch(rng, batch_size) * 1e-3  # → cm/yr
+            total_change = ages_raw * erosions_raw   # signed cm: positive=erosion, negative=deposition
+            valid = (total_change >= edt_lo) & (total_change <= edt_hi)
             ages = ages_raw[valid]
             erosions = erosions_raw[valid]
             B = len(ages)
@@ -405,7 +407,7 @@ class MonteCarloSimulator:
             # ---- update importance-sampling grid (all draws) ----
             chi_weighted = np.exp(-chi2_batch / 2.0)
             xi = _bin_indices(ages, self._age_bins)
-            yi = _bin_indices(erosions, self._erosion_bins)
+            yi = _bin_indices(erosions, self._erosion_deposition_bins)
             zi = _bin_indices(inheritances, self._inh_bins)
             flat_idx = xi * stride_age + yi * stride_er + zi
             np.add.at(grid_sums_flat, flat_idx, chi_weighted)
@@ -419,7 +421,7 @@ class MonteCarloSimulator:
                 idx_acc = np.where(accepted)[0][:take]
                 chi2_acc[j:j + take] = chi2_batch[idx_acc]
                 age_acc[j:j + take] = ages[idx_acc]
-                erosion_acc[j:j + take] = erosions[idx_acc]
+                erosion_deposition_acc[j:j + take] = erosions[idx_acc]
                 inh_acc[j:j + take] = inheritances[idx_acc]
                 spall_acc[j:j + take] = prod_rates[idx_acc]
                 muon_acc[j:j + take] = muon_rates[idx_acc]
@@ -447,19 +449,19 @@ class MonteCarloSimulator:
         print(f"Done. {j} solutions in {counter:,} draws ({elapsed:.2f}s).", flush=True)
 
         # ---- Bayesian PDFs ----
-        pdf_age, pdf_erosion, pdf_inh = bayesian_pdf(
+        pdf_age, pdf_ed, pdf_inh = bayesian_pdf(
             grid_sums, grid_counts,
-            self._age_bins, self._erosion_bins, self._inh_bins,
+            self._age_bins, self._erosion_deposition_bins, self._inh_bins,
         )
 
         best_age_ka = pdf_age.map_value / 1e3 if pdf_age else age_acc[0] / 1e3
-        best_erosion = pdf_erosion.map_value * 1e3 if pdf_erosion else erosion_acc[0] * 1e3
+        best_ed = pdf_ed.map_value * 1e3 if pdf_ed else erosion_deposition_acc[0] * 1e3
         best_inh = pdf_inh.map_value / 1e4 if pdf_inh else inh_acc[0] / 1e4
 
         return Results(
             chi2=chi2_acc[:j],
             age=age_acc[:j],
-            erosion_rate=erosion_acc[:j],
+            erosion_deposition_rate=erosion_deposition_acc[:j],
             inheritance=inh_acc[:j],
             spall_prod_rate=spall_acc[:j],
             muon_prod_rate=muon_acc[:j],
@@ -469,13 +471,13 @@ class MonteCarloSimulator:
             n_accepted=j,
             n_iterations=counter,
             pdf_age=pdf_age,
-            pdf_erosion=pdf_erosion,
+            pdf_erosion_deposition=pdf_ed,
             pdf_inheritance=pdf_inh,
             best_age_ka=best_age_ka,
-            best_erosion_cm_ka=best_erosion,
+            best_erosion_deposition_cm_ka=best_ed,
             best_inheritance_1e4=best_inh,
             age_sigma2_plus_ka=pdf_age.sigma2_plus / 1e3 if pdf_age else float("nan"),
             age_sigma2_minus_ka=pdf_age.sigma2_minus / 1e3 if pdf_age else float("nan"),
-            erosion_sigma2_plus_cm_ka=pdf_erosion.sigma2_plus * 1e3 if pdf_erosion else float("nan"),
-            erosion_sigma2_minus_cm_ka=pdf_erosion.sigma2_minus * 1e3 if pdf_erosion else float("nan"),
+            erosion_deposition_sigma2_plus_cm_ka=pdf_ed.sigma2_plus * 1e3 if pdf_ed else float("nan"),
+            erosion_deposition_sigma2_minus_cm_ka=pdf_ed.sigma2_minus * 1e3 if pdf_ed else float("nan"),
         )
