@@ -235,6 +235,17 @@ class MonteCarloSimulator:
         # flattened grid shape for efficient indexing
         self._grid_shape = (len(self._age_bins), len(self._erosion_deposition_bins), len(self._inh_bins))
 
+        # Warn if the user's deposition limit would bury the shallowest sample above the surface
+        edt_lo = s.mc_erosion_deposition_threshold[0]   # cm, signed
+        if edt_lo < -self._z_min:
+            print(
+                f"  Warning: erosion_deposition_threshold lower bound ({edt_lo:.1f} cm) implies "
+                f"more deposition than the shallowest sample depth ({self._z_min:.1f} cm). "
+                f"The shallowness constraint will clamp deposition draws at "
+                f"{-self._z_min:.1f} cm (−z_min).",
+                flush=True,
+            )
+
         self._use_numba = NUMBA_AVAILABLE
         print(f"  Forward-model backend: {NUMBA_INFO}", flush=True)
         print("Setup complete.", flush=True)
