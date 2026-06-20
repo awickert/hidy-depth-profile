@@ -25,8 +25,42 @@ import numpy as np
 
 
 def _age_array(result) -> np.ndarray:
-    """Extract the accepted age array from a Results or JointResults object."""
+    """Extract the accepted age array from a Results, JointResults, or OSLSurface."""
     return result.age
+
+
+class OSLSurface:
+    """
+    A terrace surface dated by OSL only (no ¹⁰Be depth profile).
+
+    Represents the surface age as a large Gaussian sample so that it can be
+    passed directly to TerraceChrono alongside MonteCarloSimulator /
+    JointSimulator results.
+
+    Parameters
+    ----------
+    mean_yr : float
+        OSL date mean in years before present.
+    sigma_yr : float
+        1σ uncertainty in years.
+    n_pool : int
+        Size of the Gaussian sample pool (default 100 000; large enough that
+        resampling by TerraceChrono introduces no meaningful discretisation).
+    seed : int or None
+        RNG seed for the pool draw.
+    """
+
+    def __init__(
+        self,
+        mean_yr: float,
+        sigma_yr: float,
+        n_pool: int = 100_000,
+        seed=None,
+    ):
+        self.mean_yr = mean_yr
+        self.sigma_yr = sigma_yr
+        rng = np.random.default_rng(seed)
+        self.age = rng.normal(mean_yr, sigma_yr, n_pool)
 
 
 @dataclass
