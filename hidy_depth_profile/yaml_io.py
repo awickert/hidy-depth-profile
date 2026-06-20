@@ -86,6 +86,14 @@ def load_yaml(filename: str):
         s.mc_confidence_value = mc["confidence"]["value"]
     s.mc_n_workers = mc.get("n_workers", 4)
 
+    constraints = doc.get("constraints", {})
+    if "age_max" in constraints:
+        c = constraints["age_max"]
+        s.age_max_constraint = _DistParam(c["mode"], c["parameters"])
+    if "age_min" in constraints:
+        c = constraints["age_min"]
+        s.age_min_constraint = _DistParam(c["mode"], c["parameters"])
+
     return s
 
 
@@ -148,6 +156,16 @@ def save_yaml(settings, filename: str):
             "n_workers": settings.mc_n_workers,
         },
     }
+
+    constraints_block = {}
+    if settings.age_max_constraint is not None:
+        c = settings.age_max_constraint
+        constraints_block["age_max"] = {"mode": c.mode, "parameters": list(c.parameters)}
+    if settings.age_min_constraint is not None:
+        c = settings.age_min_constraint
+        constraints_block["age_min"] = {"mode": c.mode, "parameters": list(c.parameters)}
+    if constraints_block:
+        doc["constraints"] = constraints_block
 
     with open(filename, "w") as fh:
         yaml.dump(doc, fh, default_flow_style=False, allow_unicode=True)
