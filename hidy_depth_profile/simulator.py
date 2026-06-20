@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+from scipy.special import ndtr as _ndtr
 
 from ._numba import NUMBA_AVAILABLE, NUMBA_INFO, numba_forward_batch
 from .forward import chi2_profile
@@ -161,6 +162,54 @@ class MonteCarloSimulator:
         # shielding factor (applied to spallation only)
         self._shielding = s.shielding_value
 
+        # ---- geochronological age constraints ----
+        # For a uniform age prior, clamp the draw range at hard (constant) bounds so
+        # no draws are wasted outside the constraint.  Soft (normal) bounds are applied
+        # per-draw in run() as a weight on the importance-sampling grid.
+        self._eff_age_lo = None   # None → use s.mc_age.draw_batch unchanged
+        self._eff_age_hi = None
+        if s.mc_age.mode == "uniform":
+            lo, hi = float(s.mc_age.parameters[0]), float(s.mc_age.parameters[1])
+            if s.age_max_constraint is not None and s.age_max_constraint.mode == "constant":
+                hi = min(hi, float(s.age_max_constraint.parameters[0]))
+            if s.age_min_constraint is not None and s.age_min_constraint.mode == "constant":
+                lo = max(lo, float(s.age_min_constraint.parameters[0]))
+            if lo >= hi:
+                raise ValueError(
+                    f"Age constraints leave no valid draw range: "
+                    f"effective [{lo:.0f}, {hi:.0f}] yr"
+                )
+            self._eff_age_lo, self._eff_age_hi = lo, hi
+
+        has_max = s.age_max_constraint is not None
+        has_min = s.age_min_constraint is not None
+        if has_max or has_min:
+            print("  Age constraints:", flush=True)
+            if has_max:
+                c = s.age_max_constraint
+                if c.mode == "constant":
+                    print(f"    max age: hard bound at {c.parameters[0]/1e3:.2f} ka", flush=True)
+                else:
+                    print(
+                        f"    max age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, soft)",
+                        flush=True,
+                    )
+            if has_min:
+                c = s.age_min_constraint
+                if c.mode == "constant":
+                    print(f"    min age: hard bound at {c.parameters[0]/1e3:.2f} ka", flush=True)
+                else:
+                    print(
+                        f"    min age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, soft)",
+                        flush=True,
+                    )
+            if self._eff_age_lo is not None:
+                print(
+                    f"    effective draw range: "
+                    f"{self._eff_age_lo/1e3:.2f}–{self._eff_age_hi/1e3:.2f} ka",
+                    flush=True,
+                )
+
         # spallation surface production rate
         self._lsdn_ts = None   # populated below only for lsdn scheme
         scheme = s.production_scheme
@@ -174,7 +223,8 @@ class MonteCarloSimulator:
             spall_mean = raw * self._shielding
         else:  # lsdn — precompute paleomagnetic time series for per-draw rates
             if s.mc_age.mode == "uniform":
-                t_max_lsdn = s.mc_age.parameters[1]
+                # Use the effective upper bound (already clamped by hard constraints)
+                t_max_lsdn = self._eff_age_hi if self._eff_age_hi is not None else s.mc_age.parameters[1]
             elif s.mc_age.mode == "normal":
                 t_max_lsdn = s.mc_age.parameters[0] + 4.0 * s.mc_age.parameters[1]
             else:  # constant
@@ -229,8 +279,9 @@ class MonteCarloSimulator:
         # Bayesian grid axes
         resolution = max(2, round(2 * s.mc_n_solutions ** (1 / 3)))
         if s.mc_age.mode != "constant":
-            self._age_bins = np.linspace(s.mc_age.parameters[0],
-                                          s.mc_age.parameters[1], resolution)
+            age_lo_grid = self._eff_age_lo if self._eff_age_lo is not None else s.mc_age.parameters[0]
+            age_hi_grid = self._eff_age_hi if self._eff_age_hi is not None else s.mc_age.parameters[1]
+            self._age_bins = np.linspace(age_lo_grid, age_hi_grid, resolution)
         else:
             self._age_bins = np.array([s.mc_age.parameters[0]])
         if s.mc_erosion_deposition_rate.mode != "constant":
@@ -373,7 +424,10 @@ class MonteCarloSimulator:
                 )
 
             # ---- draw age + erosion/deposition; apply threshold + shallowness constraints ----
-            ages_raw = s.mc_age.draw_batch(rng, batch_size)
+            if self._eff_age_lo is not None:
+                ages_raw = rng.uniform(self._eff_age_lo, self._eff_age_hi, batch_size)
+            else:
+                ages_raw = s.mc_age.draw_batch(rng, batch_size)
             erosions_raw = s.mc_erosion_deposition_rate.draw_batch(rng, batch_size) * 1e-3  # → cm/yr
             total_change = ages_raw * erosions_raw   # signed cm: positive=erosion, negative=deposition
             valid = (total_change >= edt_lo) & (total_change <= edt_hi)
@@ -454,8 +508,48 @@ class MonteCarloSimulator:
             residuals = (modelled - self._measured) / (self._measured * self._rel_error)
             chi2_batch = np.sum(residuals ** 2, axis=1) / self._dof   # (B,)
 
+            # ---- geochronological constraint weights ----
+            # Each constraint contributes a probability factor to the importance
+            # weight of every draw.  For a max-age constraint (abandonment must
+            # predate the dated deposit), the factor is the probability that the
+            # draw age is younger than the constraining date.  A "constant" bound
+            # on a uniform prior is already enforced by the clamped draw range, so
+            # no extra weight is needed in that case.
+            max_c = s.age_max_constraint
+            min_c = s.age_min_constraint
+            has_soft = (
+                (max_c is not None and max_c.mode == "normal") or
+                (min_c is not None and min_c.mode == "normal")
+            )
+            has_hard_non_uniform = (
+                self._eff_age_lo is None and (
+                    (max_c is not None and max_c.mode == "constant") or
+                    (min_c is not None and min_c.mode == "constant")
+                )
+            )
+            if has_soft or has_hard_non_uniform:
+                constraint_prob = np.ones(B, dtype=float)
+                if max_c is not None:
+                    if max_c.mode == "normal":
+                        mu, sigma = max_c.parameters
+                        # P(draw age < dated deposit) = Φ((μ - age) / σ)
+                        constraint_prob *= _ndtr((mu - ages) / sigma)
+                    elif self._eff_age_lo is None:
+                        constraint_prob *= (ages <= max_c.parameters[0]).astype(float)
+                if min_c is not None:
+                    if min_c.mode == "normal":
+                        mu, sigma = min_c.parameters
+                        # P(draw age > younger limit) = Φ((age - μ) / σ)
+                        constraint_prob *= _ndtr((ages - mu) / sigma)
+                    elif self._eff_age_lo is None:
+                        constraint_prob *= (ages >= min_c.parameters[0]).astype(float)
+            else:
+                constraint_prob = None
+
             # ---- update importance-sampling grid (all draws) ----
             chi_weighted = np.exp(-chi2_batch / 2.0)
+            if constraint_prob is not None:
+                chi_weighted = chi_weighted * constraint_prob
             xi = _bin_indices(ages, self._age_bins)
             yi = _bin_indices(erosions, self._erosion_deposition_bins)
             zi = _bin_indices(inheritances, self._inh_bins)
@@ -465,6 +559,11 @@ class MonteCarloSimulator:
 
             # ---- collect accepted solutions ----
             accepted = chi2_batch <= self._chi2_thresh
+            if constraint_prob is not None:
+                # Probabilistic rejection: keep an accepted draw with probability
+                # equal to its constraint weight.  For hard bounds (0 or 1) this
+                # is deterministic; for soft (normal) bounds it is stochastic.
+                accepted = accepted & (rng.uniform(size=B) < constraint_prob)
             n_new = accepted.sum()
             if n_new > 0:
                 take = min(n_new, n_target - j)
