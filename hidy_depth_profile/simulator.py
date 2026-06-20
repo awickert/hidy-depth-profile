@@ -183,7 +183,8 @@ class MonteCarloSimulator:
 
         has_max = s.age_max_constraint is not None
         has_min = s.age_min_constraint is not None
-        if has_max or has_min:
+        has_est = s.age_estimate_constraint is not None
+        if has_max or has_min or has_est:
             print("  Age constraints:", flush=True)
             if has_max:
                 c = s.age_max_constraint
@@ -191,7 +192,7 @@ class MonteCarloSimulator:
                     print(f"    max age: hard bound at {c.parameters[0]/1e3:.2f} ka", flush=True)
                 else:
                     print(
-                        f"    max age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, soft)",
+                        f"    max age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, one-sided)",
                         flush=True,
                     )
             if has_min:
@@ -200,9 +201,15 @@ class MonteCarloSimulator:
                     print(f"    min age: hard bound at {c.parameters[0]/1e3:.2f} ka", flush=True)
                 else:
                     print(
-                        f"    min age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, soft)",
+                        f"    min age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, one-sided)",
                         flush=True,
                     )
+            if has_est:
+                c = s.age_estimate_constraint
+                print(
+                    f"    age estimate: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, bilateral)",
+                    flush=True,
+                )
             if self._eff_age_lo is not None:
                 print(
                     f"    effective draw range: "
@@ -509,17 +516,24 @@ class MonteCarloSimulator:
             chi2_batch = np.sum(residuals ** 2, axis=1) / self._dof   # (B,)
 
             # ---- geochronological constraint weights ----
-            # Each constraint contributes a probability factor to the importance
-            # weight of every draw.  For a max-age constraint (abandonment must
-            # predate the dated deposit), the factor is the probability that the
-            # draw age is younger than the constraining date.  A "constant" bound
-            # on a uniform prior is already enforced by the clamped draw range, so
-            # no extra weight is needed in that case.
+            # Two conceptually distinct types of external age information:
+            #
+            # age_max / age_min (stratigraphic ordering): one event is known to
+            # predate or postdate the surface.  The weight is the probability that
+            # the ordering holds given the uncertainty in the bounding date —
+            # a CDF evaluated at the draw age.
+            #
+            # age_estimate (independent chronometric measurement): a separate
+            # dating method measures the same event as the 10Be exposure clock.
+            # The weight is the likelihood of that measurement given the draw age —
+            # a Gaussian PDF centred on the reported age.
             max_c = s.age_max_constraint
             min_c = s.age_min_constraint
+            est_c = s.age_estimate_constraint
             has_soft = (
                 (max_c is not None and max_c.mode == "normal") or
-                (min_c is not None and min_c.mode == "normal")
+                (min_c is not None and min_c.mode == "normal") or
+                est_c is not None
             )
             has_hard_non_uniform = (
                 self._eff_age_lo is None and (
@@ -543,6 +557,15 @@ class MonteCarloSimulator:
                         constraint_prob *= _ndtr((ages - mu) / sigma)
                     elif self._eff_age_lo is None:
                         constraint_prob *= (ages >= min_c.parameters[0]).astype(float)
+                if est_c is not None:
+                    mu, sigma = est_c.parameters
+                    # age_estimate_constraint is a second independent chronometric
+                    # measurement of the same event (e.g. OSL on the surface itself,
+                    # radiocarbon on material coeval with abandonment).  The Gaussian
+                    # PDF is the likelihood of that measurement given the draw age —
+                    # ages within ±1σ of the estimate remain highly probable; ages
+                    # further away in either direction are progressively down-weighted.
+                    constraint_prob *= np.exp(-0.5 * ((ages - mu) / sigma) ** 2)
             else:
                 constraint_prob = None
 

@@ -208,6 +208,78 @@ class TestHardMinConstraint:
 # Soft (normal) constraint
 # ---------------------------------------------------------------------------
 
+class TestAgeEstimateConstraint:
+    """
+    age_estimate_constraint uses a bilateral Gaussian PDF weight.
+    Ages both older and younger than the estimate mean are penalised;
+    unlike age_max_constraint, ages older than the mean remain allowed.
+    """
+
+    def test_normal_mode_accepted(self):
+        s = _make_settings()
+        s.age_estimate_constraint = _DistParam("normal", [13000.0, 1000.0])
+        assert s.age_estimate_constraint.parameters == [13000.0, 1000.0]
+
+    def test_constant_mode_rejected(self):
+        s = _make_settings()
+        with pytest.raises(ValueError, match="normal"):
+            s.age_estimate_constraint = _DistParam("constant", [13000.0])
+
+    def test_set_none_clears(self):
+        s = _make_settings()
+        s.age_estimate_constraint = _DistParam("normal", [13000.0, 1000.0])
+        s.age_estimate_constraint = None
+        assert s.age_estimate_constraint is None
+
+    def test_yaml_roundtrip(self, tmp_path):
+        from hidy_depth_profile.yaml_io import load_yaml, save_yaml
+        s = _make_settings()
+        s.age_estimate_constraint = _DistParam("normal", [13000.0, 1000.0])
+        path = str(tmp_path / "est.yaml")
+        save_yaml(s, path)
+        s2 = load_yaml(path)
+        assert s2.age_estimate_constraint.mode == "normal"
+        assert s2.age_estimate_constraint.parameters == [13000.0, 1000.0]
+
+    @pytest.fixture(scope="class")
+    def results_estimate(self):
+        from hidy_depth_profile.simulator import MonteCarloSimulator
+        s = _make_settings(n_solutions=500)
+        # Estimate at 13 ka matches the synthetic data; MAP should stay near 13 ka
+        s.age_estimate_constraint = _DistParam("normal", [13000.0, 1000.0])
+        return MonteCarloSimulator(s).run(seed=42)
+
+    def test_map_near_estimate(self, results_estimate):
+        """MAP should lie within 2σ of the estimate centre."""
+        assert abs(results_estimate.best_age_ka - 13.0) < 2.0
+
+    def test_older_ages_not_excluded(self, results_estimate):
+        """Bilateral constraint: accepted solutions older than the estimate mean are allowed."""
+        assert np.any(results_estimate.age > 13000.0), (
+            "No accepted solution older than the estimate mean — constraint is not bilateral"
+        )
+
+    def test_younger_ages_not_excluded(self, results_estimate):
+        """Bilateral constraint: accepted solutions younger than the estimate mean are allowed."""
+        assert np.any(results_estimate.age < 13000.0)
+
+    @pytest.fixture(scope="class")
+    def results_tight_estimate(self):
+        """Tight estimate far from unconstrained MAP should pull the result toward the estimate."""
+        from hidy_depth_profile.simulator import MonteCarloSimulator
+        base = _make_settings(n_solutions=500)
+        constrained = _make_settings(n_solutions=500)
+        # Tight estimate 3 ka younger than the unconstrained MAP (~13 ka)
+        constrained.age_estimate_constraint = _DistParam("normal", [10000.0, 500.0])
+        r_base = MonteCarloSimulator(base).run(seed=42)
+        r_con  = MonteCarloSimulator(constrained).run(seed=42)
+        return r_base, r_con
+
+    def test_tight_estimate_shifts_map(self, results_tight_estimate):
+        r_base, r_con = results_tight_estimate
+        assert r_con.best_age_ka < r_base.best_age_ka
+
+
 class TestSoftMaxConstraint:
     """
     A tight normal max constraint centred well below the unconstrained MAP

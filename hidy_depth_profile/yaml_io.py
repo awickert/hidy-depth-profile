@@ -93,6 +93,9 @@ def load_yaml(filename: str):
     if "age_min" in constraints:
         c = constraints["age_min"]
         s.age_min_constraint = _DistParam(c["mode"], c["parameters"])
+    if "age_estimate" in constraints:
+        c = constraints["age_estimate"]
+        s.age_estimate_constraint = _DistParam(c["mode"], c["parameters"])
 
     return s
 
@@ -164,6 +167,9 @@ def save_yaml(settings, filename: str):
     if settings.age_min_constraint is not None:
         c = settings.age_min_constraint
         constraints_block["age_min"] = {"mode": c.mode, "parameters": list(c.parameters)}
+    if settings.age_estimate_constraint is not None:
+        c = settings.age_estimate_constraint
+        constraints_block["age_estimate"] = {"mode": c.mode, "parameters": list(c.parameters)}
     if constraints_block:
         doc["constraints"] = constraints_block
 

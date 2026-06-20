@@ -121,6 +121,7 @@ class ProfileSettings:
         # geochronological age constraints
         self._age_max_constraint: Optional[_DistParam] = None
         self._age_min_constraint: Optional[_DistParam] = None
+        self._age_estimate_constraint: Optional[_DistParam] = None
 
     # ------------------------------------------------------------------ site
     @property
@@ -445,6 +446,24 @@ class ProfileSettings:
         if v is not None:
             self._validate_constraint("age_min_constraint", v)
         self._age_min_constraint = v
+
+    @property
+    def age_estimate_constraint(self): return self._age_estimate_constraint
+    @age_estimate_constraint.setter
+    def age_estimate_constraint(self, v):
+        if v is not None:
+            if not isinstance(v, _DistParam):
+                raise TypeError("age_estimate_constraint must be a _DistParam or None")
+            if v.mode != "normal":
+                raise ValueError(
+                    "age_estimate_constraint.mode must be 'normal' — "
+                    "a point estimate with no uncertainty is not meaningful here"
+                )
+            if len(v.parameters) != 2 or v.parameters[1] <= 0:
+                raise ValueError(
+                    "age_estimate_constraint: requires [mean, sigma] with sigma > 0"
+                )
+        self._age_estimate_constraint = v
 
     # ---------------------------------------------------------- serialisation
     def validate(self):
