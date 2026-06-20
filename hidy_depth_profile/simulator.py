@@ -405,9 +405,15 @@ class MonteCarloSimulator:
             )
             natts = s.mc_neutron_attenuation.draw_batch(rng, B)
 
-            # noisy muon attenuation scale factors
-            cfbs = self._fast_surface * (1.0 + rng.standard_normal(B) * self._fast_relerr)
-            cnbs = self._neg_surface * (1.0 + rng.standard_normal(B) * self._neg_relerr)
+            # noisy muon attenuation scale factors.  For low-elevation sites the
+            # exponential fits are poor (fast_relerr, neg_relerr ~ 0.9), so noise
+            # occasionally drives the amplitude negative, inverting the attenuation
+            # sign and blowing up the forward model.  Floor at a tiny positive
+            # epsilon (not 0.0 — 0.0 would give 0*rho/0 = nan when er=0) so the
+            # bad draws contribute a negligible, numerically stable production rate.
+            _MU_EPS = 1e-30
+            cfbs = np.maximum(_MU_EPS, self._fast_surface * (1.0 + rng.standard_normal(B) * self._fast_relerr))
+            cnbs = np.maximum(_MU_EPS, self._neg_surface * (1.0 + rng.standard_normal(B) * self._neg_relerr))
 
             # decay constant with half-life uncertainty
             decay_consts = np.log(2.0) / (
