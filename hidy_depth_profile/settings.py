@@ -90,6 +90,7 @@ class ProfileSettings:
         self._constant_rate: float = 5.5
         self._lsdn_assumed_age_yr: int = 15000
         self._lsdn_iterate: bool = False
+        self._lsdn_production_error_frac: float = 0.0
         self._collection_year: int = 2024
         self._production_error: _DistParam = _DistParam("normal", [4.086, 0.2])
         self._half_life_sigma: float = 0.0
@@ -248,6 +249,15 @@ class ProfileSettings:
     def lsdn_iterate(self): return self._lsdn_iterate
     @lsdn_iterate.setter
     def lsdn_iterate(self, v): self._lsdn_iterate = bool(v)
+
+    @property
+    def lsdn_production_error_frac(self): return self._lsdn_production_error_frac
+    @lsdn_production_error_frac.setter
+    def lsdn_production_error_frac(self, v):
+        v = float(v)
+        if v < 0:
+            raise ValueError("lsdn_production_error_frac must be >= 0")
+        self._lsdn_production_error_frac = v
 
     @property
     def collection_year(self): return self._collection_year

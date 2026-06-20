@@ -41,6 +41,7 @@ def load_yaml(filename: str):
         lsdn = prod["lsdn"]
         s.lsdn_assumed_age_yr = lsdn.get("assumed_age_yr", 15000)
         s.lsdn_iterate = lsdn.get("iterate", False)
+        s.lsdn_production_error_frac = lsdn.get("production_error_frac", 0.0)
     if "collection_year" in prod:
         s.collection_year = prod["collection_year"]
     if "error" in prod:
@@ -115,6 +116,7 @@ def save_yaml(settings, filename: str):
             "lsdn": {
                 "assumed_age_yr": settings.lsdn_assumed_age_yr,
                 "iterate": settings.lsdn_iterate,
+                "production_error_frac": settings.lsdn_production_error_frac,
             },
             "collection_year": settings.collection_year,
             "error": _dp(settings.production_error),
