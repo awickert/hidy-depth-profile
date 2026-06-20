@@ -287,3 +287,49 @@ class TestTerraceChrono:
         result = tc.constrain(n_draws=300, seed=77)
         assert np.all(result.ages["OLD"] > result.ages["YOUNG_GROUP"])
         assert result.n_accepted == 300
+
+
+# ---------------------------------------------------------------------------
+# Multiple age_max_constraints
+# ---------------------------------------------------------------------------
+
+class TestMultipleMaxConstraints:
+    """Two independent OSL upper bounds on the same profile/joint group."""
+
+    def test_single_profile_two_max_constraints(self):
+        """age_max_constraints list is accepted and shifts MAP younger."""
+        from hidy_depth_profile.simulator import MonteCarloSimulator
+
+        s_unconstrained = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=400)
+        s_constrained   = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=400)
+        # Apply two upper bounds: tight (10 ka) and loose (14 ka)
+        s_constrained.age_max_constraint  = _DistParam("normal", [10_000, 500])
+        s_constrained.age_max_constraints = [_DistParam("normal", [14_000, 500])]
+
+        r_unc = MonteCarloSimulator(s_unconstrained).run(seed=10)
+        r_con = MonteCarloSimulator(s_constrained).run(seed=10)
+
+        # Both constraints push MAP younger; constrained MAP ≤ unconstrained MAP
+        assert r_con.best_age_ka <= r_unc.best_age_ka + 1.0, (
+            f"Constrained MAP {r_con.best_age_ka:.1f} ka not younger than "
+            f"unconstrained {r_unc.best_age_ka:.1f} ka"
+        )
+        # All accepted ages should satisfy the tighter bound with high probability
+        assert np.percentile(r_con.age, 95) < 12_000, (
+            "95th-percentile age exceeds tight OSL upper bound"
+        )
+
+    def test_joint_two_max_constraints_on_one_profile(self):
+        """age_max_constraints on one profile in a JointSimulator is applied."""
+        from hidy_depth_profile.joint_simulator import JointSimulator
+
+        sA = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=300)
+        sB = _make_settings(_CONC_B, _DEPTHS_B, n_solutions=300)
+        # Both OSL bounds on B; A has no constraint
+        sB.age_max_constraint  = _DistParam("normal", [10_000, 500])
+        sB.age_max_constraints = [_DistParam("normal", [14_000, 500])]
+
+        r = JointSimulator({"A": sA, "B": sB}).run(seed=20)
+        assert r.n_accepted == 300
+        # Shared age pulled younger by the B constraint
+        assert np.percentile(r.age, 95) < 12_000
