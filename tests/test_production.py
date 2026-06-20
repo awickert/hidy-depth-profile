@@ -6,7 +6,11 @@ import pytest
 
 from hidy_depth_profile.production import (
     _LZ, _Rv0, muon_production_at_depth,
+    lsdn_rates_for_ages, precompute_lsdn_timeseries,
 )
+
+# Lees Ferry site for LSDn tests
+_LF_LAT, _LF_LON, _LF_ELEV = 36.852, -111.606, 985.0
 
 
 class TestHelperFunctions:
@@ -67,3 +71,48 @@ class TestMuonProduction:
         assert np.all(np.isfinite(total))
         assert np.all(fast > 0)
         assert np.all(neg > 0)
+
+
+class TestLSDnPerDraw:
+    """Tests for precompute_lsdn_timeseries and lsdn_rates_for_ages."""
+
+    @pytest.fixture(scope="class")
+    def lsdn_ts(self):
+        return precompute_lsdn_timeseries(
+            _LF_LAT, _LF_LON, _LF_ELEV, t_max=110_000, collection_year=2010
+        )
+
+    def test_timeseries_structure(self, lsdn_ts):
+        """Time series should have consistent, adjacent intervals."""
+        assert len(lsdn_ts["tmax"]) > 0
+        assert np.allclose(lsdn_ts["tmax"][:-1], lsdn_ts["tmin"][1:])
+        assert lsdn_ts["tmin"][0] == 0.0
+        assert lsdn_ts["P_ref"] > 0
+
+    def test_rates_match_surface_rate(self, lsdn_ts):
+        """Per-draw rates must match lsdn_surface_rate at the same ages."""
+        from hidy_depth_profile.production import lsdn_surface_rate
+        test_ages = np.array([60_000.0, 85_000.0, 110_000.0])
+        batch = lsdn_rates_for_ages(test_ages, lsdn_ts)
+        single = np.array([
+            lsdn_surface_rate(_LF_LAT, _LF_LON, _LF_ELEV, a, 4.086, 2010)
+            for a in test_ages
+        ])
+        np.testing.assert_allclose(batch, single, rtol=1e-10)
+
+    def test_rates_vary_with_age(self, lsdn_ts):
+        """LSDn rate should differ between 60 ka and 110 ka (geomagnetic variation)."""
+        ages = np.array([60_000.0, 110_000.0])
+        rates = lsdn_rates_for_ages(ages, lsdn_ts)
+        assert rates[0] != rates[1]
+        assert np.all(rates > 0)
+
+    def test_batch_vs_scalar(self, lsdn_ts):
+        """Batch evaluation must match scalar loop across a random set of ages."""
+        rng = np.random.default_rng(42)
+        ages = rng.uniform(60_000, 110_000, 50)
+        batch = lsdn_rates_for_ages(ages, lsdn_ts)
+        scalar = np.array([
+            float(lsdn_rates_for_ages(np.array([a]), lsdn_ts)[0]) for a in ages
+        ])
+        np.testing.assert_allclose(batch, scalar, rtol=1e-12)
