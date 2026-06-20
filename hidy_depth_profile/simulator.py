@@ -172,6 +172,9 @@ class MonteCarloSimulator:
             lo, hi = float(s.mc_age.parameters[0]), float(s.mc_age.parameters[1])
             if s.age_max_constraint is not None and s.age_max_constraint.mode == "constant":
                 hi = min(hi, float(s.age_max_constraint.parameters[0]))
+            for _c in s.age_max_constraints:
+                if _c.mode == "constant":
+                    hi = min(hi, float(_c.parameters[0]))
             if s.age_min_constraint is not None and s.age_min_constraint.mode == "constant":
                 lo = max(lo, float(s.age_min_constraint.parameters[0]))
             if lo >= hi:
@@ -184,7 +187,7 @@ class MonteCarloSimulator:
         has_max = s.age_max_constraint is not None
         has_min = s.age_min_constraint is not None
         has_est = s.age_estimate_constraint is not None
-        if has_max or has_min or has_est:
+        if has_max or s.age_max_constraints or has_min or has_est:
             print("  Age constraints:", flush=True)
             if has_max:
                 c = s.age_max_constraint
@@ -193,6 +196,14 @@ class MonteCarloSimulator:
                 else:
                     print(
                         f"    max age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka (1σ, one-sided)",
+                        flush=True,
+                    )
+            for _c in s.age_max_constraints:
+                if _c.mode == "constant":
+                    print(f"    max age (additional): hard bound at {_c.parameters[0]/1e3:.2f} ka", flush=True)
+                else:
+                    print(
+                        f"    max age (additional): {_c.parameters[0]/1e3:.2f} ± {_c.parameters[1]/1e3:.2f} ka (1σ, one-sided)",
                         flush=True,
                     )
             if has_min:
@@ -528,16 +539,19 @@ class MonteCarloSimulator:
             # The weight is the likelihood of that measurement given the draw age —
             # a Gaussian PDF centred on the reported age.
             max_c = s.age_max_constraint
+            max_cs = s.age_max_constraints
             min_c = s.age_min_constraint
             est_c = s.age_estimate_constraint
             has_soft = (
                 (max_c is not None and max_c.mode == "normal") or
+                any(_c.mode == "normal" for _c in max_cs) or
                 (min_c is not None and min_c.mode == "normal") or
                 est_c is not None
             )
             has_hard_non_uniform = (
                 self._eff_age_lo is None and (
                     (max_c is not None and max_c.mode == "constant") or
+                    any(_c.mode == "constant" for _c in max_cs) or
                     (min_c is not None and min_c.mode == "constant")
                 )
             )
@@ -550,6 +564,12 @@ class MonteCarloSimulator:
                         constraint_prob *= _ndtr((mu - ages) / sigma)
                     elif self._eff_age_lo is None:
                         constraint_prob *= (ages <= max_c.parameters[0]).astype(float)
+                for _c in max_cs:
+                    if _c.mode == "normal":
+                        mu, sigma = _c.parameters
+                        constraint_prob *= _ndtr((mu - ages) / sigma)
+                    elif self._eff_age_lo is None:
+                        constraint_prob *= (ages <= float(_c.parameters[0])).astype(float)
                 if min_c is not None:
                     if min_c.mode == "normal":
                         mu, sigma = min_c.parameters

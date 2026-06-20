@@ -287,13 +287,17 @@ class JointSimulator:
             for s in self._settings.values()
         )
 
-        # Geochronological constraints: first non-None per type
+        # Geochronological constraints: first non-None per type; all extra max bounds collected
         self._age_max_constraint: Optional[_DistParam] = None
+        self._age_max_constraints_extra: list = []   # all age_max_constraints lists merged
         self._age_min_constraint: Optional[_DistParam] = None
         self._age_estimate_constraint: Optional[_DistParam] = None
         for s in self._settings.values():
             if self._age_max_constraint is None:
                 self._age_max_constraint = s.age_max_constraint
+            elif s.age_max_constraint is not None:
+                self._age_max_constraints_extra.append(s.age_max_constraint)
+            self._age_max_constraints_extra.extend(s.age_max_constraints)
             if self._age_min_constraint is None:
                 self._age_min_constraint = s.age_min_constraint
             if self._age_estimate_constraint is None:
@@ -307,6 +311,9 @@ class JointSimulator:
             hi = float(s0.mc_age.parameters[1])
             if self._age_max_constraint is not None and self._age_max_constraint.mode == "constant":
                 hi = min(hi, float(self._age_max_constraint.parameters[0]))
+            for _c in self._age_max_constraints_extra:
+                if _c.mode == "constant":
+                    hi = min(hi, float(_c.parameters[0]))
             if self._age_min_constraint is not None and self._age_min_constraint.mode == "constant":
                 lo = max(lo, float(self._age_min_constraint.parameters[0]))
             if lo >= hi:
@@ -316,6 +323,7 @@ class JointSimulator:
             self._eff_age_lo, self._eff_age_hi = lo, hi
 
         if (self._age_max_constraint is not None or
+                self._age_max_constraints_extra or
                 self._age_min_constraint is not None or
                 self._age_estimate_constraint is not None):
             print("  Age constraints (shared):", flush=True)
@@ -326,6 +334,14 @@ class JointSimulator:
                 else:
                     print(
                         f"    max age: {c.parameters[0]/1e3:.2f} ± {c.parameters[1]/1e3:.2f} ka "
+                        f"(1σ, one-sided)", flush=True,
+                    )
+            for _c in self._age_max_constraints_extra:
+                if _c.mode == "constant":
+                    print(f"    max age (additional): hard bound at {_c.parameters[0]/1e3:.2f} ka", flush=True)
+                else:
+                    print(
+                        f"    max age (additional): {_c.parameters[0]/1e3:.2f} ± {_c.parameters[1]/1e3:.2f} ka "
                         f"(1σ, one-sided)", flush=True,
                     )
             if self._age_min_constraint is not None:
@@ -630,15 +646,18 @@ class JointSimulator:
 
             # ---- geochronological constraint weights (on shared age) ----
             max_c = self._age_max_constraint
+            max_cs = self._age_max_constraints_extra
             min_c = self._age_min_constraint
             est_c = self._age_estimate_constraint
             has_soft = (
                 (max_c is not None and max_c.mode == "normal") or
+                any(_c.mode == "normal" for _c in max_cs) or
                 (min_c is not None and min_c.mode == "normal") or
                 est_c is not None
             )
             has_hard_non_uniform = self._eff_age_lo is None and (
                 (max_c is not None and max_c.mode == "constant") or
+                any(_c.mode == "constant" for _c in max_cs) or
                 (min_c is not None and min_c.mode == "constant")
             )
             if has_soft or has_hard_non_uniform:
@@ -649,6 +668,12 @@ class JointSimulator:
                         constraint_prob *= _ndtr((mu - ages) / sigma)
                     elif self._eff_age_lo is None:
                         constraint_prob *= (ages <= float(max_c.parameters[0])).astype(float)
+                for _c in max_cs:
+                    if _c.mode == "normal":
+                        mu, sigma = _c.parameters
+                        constraint_prob *= _ndtr((mu - ages) / sigma)
+                    elif self._eff_age_lo is None:
+                        constraint_prob *= (ages <= float(_c.parameters[0])).astype(float)
                 if min_c is not None:
                     if min_c.mode == "normal":
                         mu, sigma = min_c.parameters

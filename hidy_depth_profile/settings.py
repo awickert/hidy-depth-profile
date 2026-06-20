@@ -120,6 +120,7 @@ class ProfileSettings:
 
         # geochronological age constraints
         self._age_max_constraint: Optional[_DistParam] = None
+        self._age_max_constraints: list = []   # additional independent max bounds
         self._age_min_constraint: Optional[_DistParam] = None
         self._age_estimate_constraint: Optional[_DistParam] = None
 
@@ -438,6 +439,15 @@ class ProfileSettings:
         if v is not None:
             self._validate_constraint("age_max_constraint", v)
         self._age_max_constraint = v
+
+    @property
+    def age_max_constraints(self): return self._age_max_constraints
+    @age_max_constraints.setter
+    def age_max_constraints(self, v):
+        v = list(v)
+        for i, item in enumerate(v):
+            self._validate_constraint(f"age_max_constraints[{i}]", item)
+        self._age_max_constraints = v
 
     @property
     def age_min_constraint(self): return self._age_min_constraint
