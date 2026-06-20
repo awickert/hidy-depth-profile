@@ -28,7 +28,8 @@ import numpy as np
 from ._numba import NUMBA_AVAILABLE, NUMBA_INFO, numba_forward_batch
 from .forward import chi2_profile
 from .inversion import BayesianPDF, bayesian_pdf, chi2_threshold
-from .production import fit_muon_curves, lsdn_surface_rate, stone2000_surface_rate
+from .production import (fit_muon_curves, lsdn_rates_for_ages,
+                          precompute_lsdn_timeseries, stone2000_surface_rate)
 from .settings import ProfileSettings
 
 _BE10_HALFLIFE = 1.387e6   # yr
@@ -161,6 +162,7 @@ class MonteCarloSimulator:
         self._shielding = s.shielding_value
 
         # spallation surface production rate
+        self._lsdn_ts = None   # populated below only for lsdn scheme
         scheme = s.production_scheme
         if scheme == "constant":
             spall_mean = s.constant_rate
@@ -170,13 +172,21 @@ class MonteCarloSimulator:
                 s.reference_rate, s.isotope,
             )
             spall_mean = raw * self._shielding
-        else:  # lsdn
-            raw = lsdn_surface_rate(
+        else:  # lsdn — precompute paleomagnetic time series for per-draw rates
+            if s.mc_age.mode == "uniform":
+                t_max_lsdn = s.mc_age.parameters[1]
+            elif s.mc_age.mode == "normal":
+                t_max_lsdn = s.mc_age.parameters[0] + 4.0 * s.mc_age.parameters[1]
+            else:  # constant
+                t_max_lsdn = s.mc_age.parameters[0]
+            print("  Precomputing LSDn paleomagnetic time series …", flush=True)
+            self._lsdn_ts = precompute_lsdn_timeseries(
                 s.latitude, s.longitude, s.elevation,
-                s.lsdn_assumed_age_yr, s.reference_rate,
-                s.collection_year, s.isotope,
+                t_max_lsdn, s.collection_year, s.isotope,
             )
-            spall_mean = raw * self._shielding
+            central_age = np.mean(s.mc_age.parameters)
+            central_rate = float(lsdn_rates_for_ages(np.array([central_age]), self._lsdn_ts)[0])
+            spall_mean = central_rate * self._shielding
         self._spall_mean = spall_mean
 
         if scheme != "constant" and s.production_error.mode == "normal":
@@ -375,7 +385,15 @@ class MonteCarloSimulator:
 
             # ---- draw remaining parameters for valid draws ----
             inheritances = s.mc_inheritance.draw_batch(rng, B)
-            prod_rates = s.production_error.draw_batch(rng, B)
+            if self._lsdn_ts is not None:
+                # Per-draw LSDn rate: deterministic from age + optional fractional noise
+                prod_rates = lsdn_rates_for_ages(ages, self._lsdn_ts) * self._shielding
+                if s.lsdn_production_error_frac > 0:
+                    prod_rates = prod_rates * (
+                        1.0 + rng.standard_normal(B) * s.lsdn_production_error_frac
+                    )
+            else:
+                prod_rates = s.production_error.draw_batch(rng, B)
             muon_rates = self._total_muon * (
                 1.0 + rng.standard_normal(B) * (s.muon_percent_error / 100.0)
             )
