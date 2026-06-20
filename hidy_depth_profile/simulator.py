@@ -195,7 +195,13 @@ class MonteCarloSimulator:
             half = (s._production_error.parameters[1] - s._production_error.parameters[0]) / 2.0
             s._production_error.parameters = [spall_mean - half, spall_mean + half]
 
-        if s.production_error.mode == "constant":
+        if scheme == "lsdn":
+            print(
+                f"  LSDn rate at central prior age ({central_age/1e3:.0f} ka, shielded): "
+                f"{spall_mean:.4f} at/g/yr",
+                flush=True,
+            )
+        elif s.production_error.mode == "constant":
             print(f"  Spallation rate (constant, pre-computed): {s.production_error.parameters[0]:.4f} at/g/yr",
                   flush=True)
         else:
