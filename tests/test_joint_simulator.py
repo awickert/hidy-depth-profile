@@ -293,6 +293,56 @@ class TestTerraceChrono:
 # Multiple age_max_constraints
 # ---------------------------------------------------------------------------
 
+class TestOSLSurface:
+    """OSLSurface wraps a Gaussian pool and works inside TerraceChrono."""
+
+    def test_age_attribute_shape(self):
+        from hidy_depth_profile.terrace_chrono import OSLSurface
+        surf = OSLSurface(mean_yr=17000, sigma_yr=900, n_pool=5000, seed=1)
+        assert surf.age.shape == (5000,)
+
+    def test_age_mean_close_to_input(self):
+        from hidy_depth_profile.terrace_chrono import OSLSurface
+        surf = OSLSurface(mean_yr=17000, sigma_yr=900, n_pool=100_000, seed=2)
+        assert abs(surf.age.mean() - 17000) < 50
+
+    def test_usable_in_terrace_chrono(self):
+        from hidy_depth_profile.terrace_chrono import OSLSurface, TerraceChrono
+        from hidy_depth_profile.simulator import MonteCarloSimulator
+
+        # OSL-only older surface at ~17 ka
+        utf = OSLSurface(mean_yr=17000, sigma_yr=900, seed=3)
+        # 10Be younger surface at ~13 ka
+        s = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=300)
+        r = MonteCarloSimulator(s).run(seed=4)
+
+        tc = TerraceChrono(
+            surfaces={"UTF": utf, "LTF": r},
+            ordering_constraints=[("UTF", "LTF")],
+        )
+        result = tc.constrain(n_draws=300, seed=5)
+        assert result.n_accepted == 300
+        assert np.all(result.ages["UTF"] > result.ages["LTF"])
+
+    def test_osl_surface_tightens_upper_tail(self):
+        """UTF ordering constraint should reduce LTF ages above UTF mean."""
+        from hidy_depth_profile.terrace_chrono import OSLSurface, TerraceChrono
+        from hidy_depth_profile.simulator import MonteCarloSimulator
+
+        # Tight OSL bound at 15 ka; LTF has a wide prior that extends above it
+        utf = OSLSurface(mean_yr=15000, sigma_yr=200, n_pool=100_000, seed=6)
+        s = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=500)
+        r = MonteCarloSimulator(s).run(seed=7)
+
+        tc = TerraceChrono(
+            surfaces={"UTF": utf, "LTF": r},
+            ordering_constraints=[("UTF", "LTF")],
+        )
+        result = tc.constrain(n_draws=300, seed=8)
+        # All constrained LTF ages must be below the UTF draw for that tuple
+        assert np.all(result.ages["LTF"] < 15000 + 4 * 200)
+
+
 class TestMultipleMaxConstraints:
     """Two independent OSL upper bounds on the same profile/joint group."""
 
