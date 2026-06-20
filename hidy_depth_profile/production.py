@@ -257,6 +257,29 @@ def lsdn_surface_rate(lat, lon, elev, assumed_age_yr,
     -------
     float, time-averaged surface production rate (at/g/yr)
     """
+    ts = precompute_lsdn_timeseries(lat, lon, elev, assumed_age_yr, collection_year, isotope)
+    return float(lsdn_rates_for_ages(np.array([float(assumed_age_yr)]), ts)[0])
+
+
+def precompute_lsdn_timeseries(lat, lon, elev, t_max,
+                                collection_year=2024, isotope='Be-10'):
+    """
+    Pre-compute the LSDn paleomagnetic scaling-factor time series for [0, t_max] yr.
+
+    Called once at simulator setup; the returned cache is consumed by
+    lsdn_rates_for_ages each MC batch in O(B log N) time via prefix sums.
+
+    Parameters
+    ----------
+    lat, lon, elev : site location
+    t_max : float, upper limit of the integration window (yr)
+    collection_year : CE year of sample collection
+    isotope : str, 'Be-10' or 'Al-26'
+
+    Returns
+    -------
+    dict with keys: tmin, tmax, SF, cum_SF_dt, P_ref, pressure
+    """
     from stoneage.atmosphere import ERA40atm
     from stoneage.scaling import get_LSDnSF
     from stoneage.cutoff_rigidity import get_DipRc
@@ -265,12 +288,15 @@ def lsdn_surface_rate(lat, lon, elev, assumed_age_yr,
     consts = make_consts()
     nuclide = 'N10quartz' if isotope == 'Be-10' else 'N26quartz'
     nidx = consts.nuclides.index(nuclide)
+    P_ref = float(consts.refP_LSDn[nidx])
+
+    pressure = ERA40atm(lat, lon, elev)[0]
 
     rin = {
         "lat": np.array([float(lat)]),
         "long": np.array([float(lon)]),
         "yr": np.array([float(collection_year)]),
-        "t": np.array([float(assumed_age_yr)]),
+        "t": np.array([float(t_max)]),
     }
     sfdata = get_DipRc(rin)
 
@@ -280,14 +306,62 @@ def lsdn_surface_rate(lat, lon, elev, assumed_age_yr,
         "Rc": [sfdata["Rc"][0]],
         "S": [sfdata["S"][0]],
         "nuclide": [nuclide],
-        "pressure": np.array([ERA40atm(lat, lon, elev)[0]]),
+        "pressure": np.array([pressure]),
     }
     sfdata2 = get_LSDnSF(sfdata2)
 
-    dt = sfdata2["tmax"][0] - sfdata2["tmin"][0]
-    mean_SF = np.average(sfdata2["LSDn"][0], weights=dt)
+    tmin = sfdata2["tmin"][0]
+    tmax = sfdata2["tmax"][0]
+    SF = sfdata2["LSDn"][0]
+    cum_SF_dt = np.cumsum(SF * (tmax - tmin))
 
-    return float(consts.refP_LSDn[nidx] * mean_SF)
+    return {
+        "tmin": tmin,
+        "tmax": tmax,
+        "SF": SF,
+        "cum_SF_dt": cum_SF_dt,
+        "P_ref": P_ref,
+        "pressure": float(pressure),
+    }
+
+
+def lsdn_rates_for_ages(ages, lsdn_ts):
+    """
+    Vectorised time-averaged LSDn rate for a batch of ages (shielding not applied).
+
+    Uses prefix sums for O(B log N) evaluation after O(N) setup.
+
+    Parameters
+    ----------
+    ages : array-like (B,), yr before present
+    lsdn_ts : dict from precompute_lsdn_timeseries
+
+    Returns
+    -------
+    rates : (B,) array, at/g/yr
+    """
+    ages = np.asarray(ages, dtype=float)
+    tmin = lsdn_ts["tmin"]
+    tmax = lsdn_ts["tmax"]
+    SF = lsdn_ts["SF"]
+    cum_SF_dt = lsdn_ts["cum_SF_dt"]
+    P_ref = lsdn_ts["P_ref"]
+    N = len(tmax)
+
+    # j[i] = number of fully elapsed intervals (tmax[k] <= ages[i])
+    j = np.searchsorted(tmax, ages, side='right')  # (B,)
+
+    # Contribution from complete intervals
+    j_safe = np.clip(j - 1, 0, N - 1)
+    sf_dt = np.where(j > 0, cum_SF_dt[j_safe], 0.0)
+
+    # Partial interval at position j (if j < N); tmin[0] = 0, so ages < tmax[0] work correctly
+    j_part = np.clip(j, 0, N - 1)
+    has_partial = j < N
+    partial_dur = np.maximum(0.0, ages - np.where(has_partial, tmin[j_part], 0.0))
+    sf_dt = sf_dt + np.where(has_partial, SF[j_part] * partial_dur, 0.0)
+
+    return P_ref * sf_dt / np.maximum(ages, 1.0)
 
 
 # ---------------------------------------------------------------------------
