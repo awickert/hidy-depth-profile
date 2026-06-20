@@ -118,6 +118,10 @@ class ProfileSettings:
         self._shielding_from_file: bool = False
         self._shielding_value: float = 1.0
 
+        # geochronological age constraints
+        self._age_max_constraint: Optional[_DistParam] = None
+        self._age_min_constraint: Optional[_DistParam] = None
+
     # ------------------------------------------------------------------ site
     @property
     def site_name(self): return self._site_name
@@ -411,6 +415,36 @@ class ProfileSettings:
         if not 0 <= v <= 1:
             raise ValueError("shielding_value must be 0–1")
         self._shielding_value = v
+
+    # -------------------------------------------------- age constraints
+    def _validate_constraint(self, name: str, v) -> None:
+        if not isinstance(v, _DistParam):
+            raise TypeError(f"{name} must be a _DistParam or None")
+        if v.mode not in ("constant", "normal"):
+            raise ValueError(f"{name}.mode must be 'constant' or 'normal'")
+        if v.mode == "constant" and len(v.parameters) != 1:
+            raise ValueError(f"{name}: constant mode requires exactly 1 parameter")
+        if v.mode == "normal":
+            if len(v.parameters) != 2:
+                raise ValueError(f"{name}: normal mode requires exactly 2 parameters")
+            if v.parameters[1] <= 0:
+                raise ValueError(f"{name}: sigma must be > 0")
+
+    @property
+    def age_max_constraint(self): return self._age_max_constraint
+    @age_max_constraint.setter
+    def age_max_constraint(self, v):
+        if v is not None:
+            self._validate_constraint("age_max_constraint", v)
+        self._age_max_constraint = v
+
+    @property
+    def age_min_constraint(self): return self._age_min_constraint
+    @age_min_constraint.setter
+    def age_min_constraint(self, v):
+        if v is not None:
+            self._validate_constraint("age_min_constraint", v)
+        self._age_min_constraint = v
 
     # ---------------------------------------------------------- serialisation
     def validate(self):
