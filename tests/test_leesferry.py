@@ -30,6 +30,34 @@ def _data_available():
 
 
 @pytest.fixture(scope="module")
+def leesferry_lsdn():
+    """
+    Run Lees Ferry with the LSDn production scheme.
+
+    Returns (simulator, results) so tests can access simulator internals
+    (stored time series, attenuation length fractions) alongside the
+    accepted solutions.
+    """
+    if not _data_available():
+        pytest.skip("Lees Ferry data files not found")
+
+    from hidy_depth_profile.yaml_io import load_yaml
+    from hidy_depth_profile.simulator import MonteCarloSimulator
+
+    s = load_yaml(str(_YAML))
+    s.load_profile(str(_DATA_DIR / "Leesferry_sand6.txt"))
+    s.production_scheme = "lsdn"
+    s.collection_year = 2010
+    s.mc_n_solutions = 100
+    s.mc_confidence_mode = "sigma"
+    s.mc_confidence_value = 2.0
+
+    sim = MonteCarloSimulator(s)
+    results = sim.run(seed=42)
+    return sim, results
+
+
+@pytest.fixture(scope="module")
 def leesferry_results():
     """Run the Lees Ferry simulation once and return the Results object."""
     if not _data_available():
@@ -138,4 +166,83 @@ class TestLeesFerryForwardModel:
         conc = pd["concentration"]
         assert np.all(np.diff(conc) < 0), (
             "Lees Ferry measured concentrations do not decrease monotonically with depth"
+        )
+
+
+class TestLeesFerryLSDn:
+    """
+    End-to-end tests for the LSDn per-draw production rate path.
+
+    Two complementary checks:
+    1. Stored spall_prod_rate must equal lsdn_rates_for_ages(age) × shielding
+       to floating-point precision — direct proof that the per-draw rate was
+       used correctly.
+    2. Re-running the forward model at the best-fit solution with stored
+       parameters must reproduce the stored chi² — confirms the stored rates
+       are self-consistent with the accepted concentrations.
+    """
+
+    def test_lsdn_run_produces_solutions(self, leesferry_lsdn):
+        """LSDn run should converge to the requested number of solutions."""
+        _, r = leesferry_lsdn
+        assert r.n_accepted == 100
+
+    def test_spall_rates_match_per_draw_lsdn(self, leesferry_lsdn):
+        """
+        spall_prod_rate[i] must equal lsdn_rates_for_ages(age[i]) × shielding
+        for every accepted solution — no fixed rate should have been used.
+        """
+        sim, r = leesferry_lsdn
+        from hidy_depth_profile.production import lsdn_rates_for_ages
+        expected = lsdn_rates_for_ages(r.age, sim._lsdn_ts) * sim._shielding
+        np.testing.assert_allclose(r.spall_prod_rate, expected, rtol=1e-10,
+                                   err_msg="spall_prod_rate does not match per-draw LSDn rates")
+
+    def test_chi2_reproducible_at_best_solution(self, leesferry_lsdn):
+        """
+        Re-running the forward model at the stored best-fit parameters must
+        reproduce the stored chi² to high precision.
+
+        v1 is reconstructed from the stored neutron_attenuation plus the
+        simulator's mean muon attenuation lengths.  The per-draw noise on
+        those lengths is small (fast_relerr ≈ 0.06 %, neg_relerr ≈ 0.02 %)
+        and is not stored in Results, so an exact match is not expected; the
+        tolerance of 1e-3 accommodates that approximation while still
+        catching large errors.
+        """
+        sim, r = leesferry_lsdn
+        from hidy_depth_profile.forward import profile_concentration, chi2_profile
+
+        best = int(np.argmin(r.chi2))
+
+        v1 = np.array([
+            r.neutron_attenuation[best],
+            sim._fast_surface * sim._mufast1,
+            sim._fast_surface * sim._mufast2,
+            sim._neg_surface * sim._muneg1,
+            sim._neg_surface * sim._muneg2,
+            sim._neg_surface * sim._muneg3,
+        ])
+        v2 = np.array([
+            r.spall_prod_rate[best],
+            r.muon_prod_rate[best] * sim._cfast1,
+            r.muon_prod_rate[best] * sim._cfast2,
+            r.muon_prod_rate[best] * sim._cneg1,
+            r.muon_prod_rate[best] * sim._cneg2,
+            r.muon_prod_rate[best] * sim._cneg3,
+        ])
+
+        pd = sim.s.profile_data
+        modelled = profile_concentration(
+            pd, v1, v2,
+            r.age[best], r.decay_const[best],
+            r.erosion_deposition_rate[best], r.inheritance[best],
+            r.densities[best],
+        )
+        chi2_recomputed = chi2_profile(
+            modelled, pd["concentration"], pd["rel_error"], dof=sim._dof
+        )
+        assert abs(chi2_recomputed - r.chi2[best]) < 1e-3, (
+            f"Recomputed chi²={chi2_recomputed:.6f} does not match stored "
+            f"{r.chi2[best]:.6f} (diff={abs(chi2_recomputed - r.chi2[best]):.2e})"
         )
