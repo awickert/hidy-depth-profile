@@ -1,9 +1,11 @@
 """
-Tests for JointSimulator and TerraceChrono.
+Tests for JointSimulator.
 
 Uses a constant production scheme to avoid network calls.  Two synthetic
 profiles are constructed for ~13 ka with slightly different depths and
 concentrations (simulating two pits on the same terrace).
+
+TerraceChrono and OSLSurface tests have moved to the terrace-chrono package.
 """
 import numpy as np
 import pytest
@@ -189,158 +191,6 @@ class TestJointNarrowerThanSingle:
             f"Joint range {joint_range:.1f} ka wider than both singles "
             f"({range_A:.1f}, {range_B:.1f} ka)"
         )
-
-
-# ---------------------------------------------------------------------------
-# TerraceChrono
-# ---------------------------------------------------------------------------
-
-class TestTerraceChrono:
-
-    @pytest.fixture(scope="class")
-    def surfaces(self):
-        """Two single-profile surfaces with well-separated age priors."""
-        from hidy_depth_profile.simulator import MonteCarloSimulator
-
-        # Older surface: higher concentrations → older age
-        s_old = _make_settings(
-            [90000.0, 63000.0, 44000.0], _DEPTHS_A, n_solutions=400
-        )
-        # Younger surface: lower concentrations → younger age
-        s_young = _make_settings(
-            [45000.0, 31000.0, 22000.0], _DEPTHS_A, n_solutions=400
-        )
-        r_old   = MonteCarloSimulator(s_old).run(seed=1)
-        r_young = MonteCarloSimulator(s_young).run(seed=2)
-        return r_old, r_young
-
-    def test_ordering_respected(self, surfaces):
-        from hidy_depth_profile.terrace_chrono import TerraceChrono
-        r_old, r_young = surfaces
-        tc = TerraceChrono(
-            surfaces={"OLD": r_old, "YOUNG": r_young},
-            ordering_constraints=[("OLD", "YOUNG")],
-        )
-        result = tc.constrain(n_draws=500, seed=99)
-        assert np.all(result.ages["OLD"] > result.ages["YOUNG"]), (
-            "Ordering violated: some constrained ages have OLD <= YOUNG"
-        )
-
-    def test_n_accepted(self, surfaces):
-        from hidy_depth_profile.terrace_chrono import TerraceChrono
-        r_old, r_young = surfaces
-        tc = TerraceChrono(
-            surfaces={"OLD": r_old, "YOUNG": r_young},
-            ordering_constraints=[("OLD", "YOUNG")],
-        )
-        result = tc.constrain(n_draws=500, seed=99)
-        assert result.n_accepted == 500
-
-    def test_unknown_name_raises(self, surfaces):
-        from hidy_depth_profile.terrace_chrono import TerraceChrono
-        r_old, r_young = surfaces
-        with pytest.raises(ValueError, match="unknown surface"):
-            TerraceChrono(
-                surfaces={"OLD": r_old, "YOUNG": r_young},
-                ordering_constraints=[("OLD", "TYPO")],
-            )
-
-    def test_summary_returns_finite_values(self, surfaces):
-        from hidy_depth_profile.terrace_chrono import TerraceChrono
-        r_old, r_young = surfaces
-        tc = TerraceChrono(
-            surfaces={"OLD": r_old, "YOUNG": r_young},
-            ordering_constraints=[("OLD", "YOUNG")],
-        )
-        result = tc.constrain(n_draws=300, seed=55)
-        s = result.summary()
-        for name in ("OLD", "YOUNG"):
-            assert np.isfinite(s[name]["map_ka"])
-            assert np.isfinite(s[name]["sigma2_minus_ka"])
-            assert np.isfinite(s[name]["sigma2_plus_ka"])
-
-    def test_joint_result_usable_in_terrace_chrono(self):
-        """JointResults.age can serve as a pool for TerraceChrono."""
-        from hidy_depth_profile.joint_simulator import JointSimulator
-        from hidy_depth_profile.simulator import MonteCarloSimulator
-        from hidy_depth_profile.terrace_chrono import TerraceChrono
-
-        # Older single surface (high concentrations)
-        s_old = _make_settings(
-            [90000.0, 63000.0, 44000.0], _DEPTHS_A, n_solutions=300
-        )
-        r_old = MonteCarloSimulator(s_old).run(seed=5)
-
-        # Younger joint group (two profiles at same ~9 ka level)
-        sA = _make_settings(
-            [45000.0, 31000.0, 22000.0], _DEPTHS_A, n_solutions=300
-        )
-        sB = _make_settings(
-            [44000.0, 30500.0, 21500.0], _DEPTHS_B, n_solutions=300
-        )
-        r_joint = JointSimulator({"A": sA, "B": sB}).run(seed=6)
-
-        tc = TerraceChrono(
-            surfaces={"OLD": r_old, "YOUNG_GROUP": r_joint},
-            ordering_constraints=[("OLD", "YOUNG_GROUP")],
-        )
-        result = tc.constrain(n_draws=300, seed=77)
-        assert np.all(result.ages["OLD"] > result.ages["YOUNG_GROUP"])
-        assert result.n_accepted == 300
-
-
-# ---------------------------------------------------------------------------
-# Multiple age_max_constraints
-# ---------------------------------------------------------------------------
-
-class TestOSLSurface:
-    """OSLSurface wraps a Gaussian pool and works inside TerraceChrono."""
-
-    def test_age_attribute_shape(self):
-        from hidy_depth_profile.terrace_chrono import OSLSurface
-        surf = OSLSurface(mean_yr=17000, sigma_yr=900, n_pool=5000, seed=1)
-        assert surf.age.shape == (5000,)
-
-    def test_age_mean_close_to_input(self):
-        from hidy_depth_profile.terrace_chrono import OSLSurface
-        surf = OSLSurface(mean_yr=17000, sigma_yr=900, n_pool=100_000, seed=2)
-        assert abs(surf.age.mean() - 17000) < 50
-
-    def test_usable_in_terrace_chrono(self):
-        from hidy_depth_profile.terrace_chrono import OSLSurface, TerraceChrono
-        from hidy_depth_profile.simulator import MonteCarloSimulator
-
-        # OSL-only older surface at ~17 ka
-        utf = OSLSurface(mean_yr=17000, sigma_yr=900, seed=3)
-        # 10Be younger surface at ~13 ka
-        s = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=300)
-        r = MonteCarloSimulator(s).run(seed=4)
-
-        tc = TerraceChrono(
-            surfaces={"UTF": utf, "LTF": r},
-            ordering_constraints=[("UTF", "LTF")],
-        )
-        result = tc.constrain(n_draws=300, seed=5)
-        assert result.n_accepted == 300
-        assert np.all(result.ages["UTF"] > result.ages["LTF"])
-
-    def test_osl_surface_tightens_upper_tail(self):
-        """UTF ordering constraint should reduce LTF ages above UTF mean."""
-        from hidy_depth_profile.terrace_chrono import OSLSurface, TerraceChrono
-        from hidy_depth_profile.simulator import MonteCarloSimulator
-
-        # Tight OSL bound at 15 ka; LTF has a wide prior that extends above it
-        utf = OSLSurface(mean_yr=15000, sigma_yr=200, n_pool=100_000, seed=6)
-        s = _make_settings(_CONC_A, _DEPTHS_A, n_solutions=500)
-        r = MonteCarloSimulator(s).run(seed=7)
-
-        tc = TerraceChrono(
-            surfaces={"UTF": utf, "LTF": r},
-            ordering_constraints=[("UTF", "LTF")],
-        )
-        result = tc.constrain(n_draws=300, seed=8)
-        # All constrained LTF ages must be below the UTF draw for that tuple
-        assert np.all(result.ages["LTF"] < 15000 + 4 * 200)
 
 
 class TestMultipleMaxConstraints:
